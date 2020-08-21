@@ -165,7 +165,8 @@ setup(
     ],
     packages=find_packages("python"),
     package_dir={'': "python"},
-    ext_modules=[],
+    ext_modules=[CMakeExtension(name='actuation_delay',
+                                source_dir='plugins/actuation_delay')],
     cmdclass=dict(build_ext=BuildExtension),
     zip_safe=False,
 )

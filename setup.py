@@ -58,7 +58,7 @@ class BuildExtension(build_ext):
 
         try:
             _ = subprocess.check_output(['which', command])
-        except OSError:
+        except subprocess.CalledProcessError:
             raise RuntimeError(f"Required command '{command}' not found")
 
     def build_extension(self, ext: CMakeExtension) -> None:

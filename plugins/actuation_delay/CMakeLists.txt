@@ -7,7 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Python3 COMPONENTS Interpreter Development QUIET)
 
 if(${Python3_FOUND})
-    list(APPEND CMAKE_PREFIX_PATH ${Python3_SITELIB}/scenario)
+    execute_process(COMMAND ${Python3_EXECUTABLE}
+        -c "import scenario, pathlib; print(pathlib.Path(scenario.__file__).parent)"
+        OUTPUT_VARIABLE Scenario_PREFIX_PATH)
+    string(STRIP ${Scenario_PREFIX_PATH} Scenario_PREFIX_PATH)
+    list(APPEND CMAKE_PREFIX_PATH ${Scenario_PREFIX_PATH})
 endif()
 
 find_package(Scenario COMPONENTS Gazebo REQUIRED)
@@ -31,4 +35,4 @@ install(
     TARGETS ActuationDelay
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION lib)
+    RUNTIME DESTINATION bin)

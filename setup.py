@@ -157,7 +157,6 @@ setup(
         "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
     ],
     use_scm_version=dict(local_scheme="dirty-tag"),
-    setup_requires=['setuptools_scm', 'ninja', 'gym-ignition'],
     python_requires='>=3.6',
     install_requires=[
         'gym-ignition',

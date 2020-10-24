@@ -40,7 +40,9 @@ setup(
     package_dir={'': "python"},
     ext_modules=[CMakeExtension(name="actuation_delay",
                                 source_dir=str(Path(".")/"plugins"/"actuation_delay"),
-                                install_prefix="gazebo_scenario_plugins")],
+                                install_prefix="gazebo_scenario_plugins",
+                                cmake_depends_on=["scenario"]),
+                 ],
     cmdclass=dict(build_ext=BuildExtension),
     zip_safe=False,
 )

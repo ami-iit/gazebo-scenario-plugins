@@ -4,16 +4,6 @@ project(ActuationDelay VERSION 1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Python3 COMPONENTS Interpreter Development QUIET)
-
-if(${Python3_FOUND})
-    execute_process(COMMAND ${Python3_EXECUTABLE}
-        -c "import scenario, pathlib; print(pathlib.Path(scenario.__file__).parent)"
-        OUTPUT_VARIABLE Scenario_PREFIX_PATH)
-    string(STRIP ${Scenario_PREFIX_PATH} Scenario_PREFIX_PATH)
-    list(APPEND CMAKE_PREFIX_PATH ${Scenario_PREFIX_PATH})
-endif()
-
 find_package(Scenario COMPONENTS Gazebo REQUIRED)
 
 # ==============

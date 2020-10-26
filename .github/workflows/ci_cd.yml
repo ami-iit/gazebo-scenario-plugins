@@ -1,0 +1,67 @@
+name: CI/CD
+
+on:
+  push:
+  pull_request:
+
+jobs:
+
+  build-n-publish:
+    name: Build, Install, Test, Publish
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version:
+          - 3.8
+
+    steps:
+
+      - uses: actions/checkout@master
+      - run: git fetch --prune --unshallow
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install basic tools
+        run: pip install pytest setuptools_scm cmake_build_extension
+
+      - name: Create sdist
+        run: python setup.py sdist
+
+      - name: Install dependencies
+        run: |
+          wget http://packages.osrfoundation.org/gazebo.key -O - | sudo apt-key add -
+          sudo apt-add-repository "deb http://packages.osrfoundation.org/gazebo/ubuntu-$CHANNEL `lsb_release -cs` main"
+          sudo apt-get update
+          sudo apt-get install ignition-$IGNITION_DISTRIBUTION libprotobuf17
+        env:
+          CHANNEL: stable
+          IGNITION_DISTRIBUTION: dome
+
+      - name: Install sdist
+        run: pip -v install dist/*
+
+      - name: Run tests
+        run: pytest tests
+        env:
+          IGN_GAZEBO_PHYSICS_ENGINE_PATH: /usr/lib/x86_64-linux-gnu/ign-physics-3/engine-plugins/
+
+      - name: Valgrind
+        if: failure()
+        run: |
+          sudo apt install valgrind
+          pip3 install colour-valgrind
+          colour-valgrind pytest tests
+        env:
+          IGN_GAZEBO_PHYSICS_ENGINE_PATH: /usr/lib/x86_64-linux-gnu/ign-physics-3/engine-plugins/
+
+      - name: Publish to PyPI
+        if: |
+          github.repository == 'dic-iit/gazebo-scenario-plugins' &&
+          github.ref == 'refs/heads/master' &&
+          github.event_name != 'pull_request'
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          password: ${{ secrets.pypi_password }}

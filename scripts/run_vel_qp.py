@@ -25,9 +25,9 @@ time.sleep(3)
 # Insert the iCub model
 icub = models.icub.ICubGazeboSimpleCollisions(world=world)
 assert icub.enable_self_collisions(enable=False)
-[j.to_gazebo().set_coulomb_friction(0.000) for j in icub.joints()]
-[j.to_gazebo().set_viscous_friction(0.000) for j in icub.joints()]
-[j.to_gazebo().set_max_generalized_force(50.0) for j in icub.joints()]
+[j.to_gazebo().set_coulomb_friction(0.001) for j in icub.joints()]
+[j.to_gazebo().set_viscous_friction(0.001) for j in icub.joints()]
+[j.to_gazebo().set_max_generalized_force(500.0) for j in icub.joints()]
 gazebo.run(paused=True)
 # time.sleep(5)
 
@@ -36,15 +36,15 @@ icub.set_controller_period(gazebo.step_size() * gazebo.steps_per_run())
 
 # Control all the joints in position. Then the controller will change the mode of the
 # controlled joints.
-assert icub.set_joint_control_mode(scenario_core.JointControlMode_velocity_direct)
+assert icub.set_joint_control_mode(scenario_core.JointControlMode_velocity_follower_dart)
 
 # Controller parameters
 parameters = velocity_wb_controller.Parameters(
     frames_of_holonomic_contacts=OrderedDict(l_sole="l_foot", r_sole="r_foot"),
-    k_p=2,
-    k_l=0.1, k_w=3,
-    fz_min=10.0,
-    num_vertexes=8,
+    k_p=5,
+    k_l=2, k_w=0,
+    fz_min=5.0,
+    num_vertexes=6,
 )
 
 # Select the controlled joints
@@ -62,8 +62,8 @@ controller = velocity_wb_controller.VelocityWBController(
     gravity=world.gravity(),
 )
 
-f = 1.0
-A = 0.1
+f = 0.2
+A = 0.05
 T = 15.0
 
 # Y axis (lateral) base trajectory
@@ -81,6 +81,26 @@ base_z_position = (A * np.cos(2 * np.pi * f * t)
 base_references = references.BaseReferences.zero()
 base_references.position = np.array(icub.base_position())
 base_references.orientation = np.array(icub.base_orientation())
+
+# Postural reference: SHOULDER_ROLL
+f_shoulder = 0.4
+A_shoulder = np.deg2rad(20.0)
+rshoulder_roll_0 = icub.get_joint(joint_name="r_shoulder_roll").position() + np.deg2rad(10)
+lshoulder_roll_0 = icub.get_joint(joint_name="l_shoulder_roll").position() + np.deg2rad(10)
+shoulder_roll = (A_shoulder * np.sin(2 * np.pi * f_shoulder * t)
+                 for t in np.arange(start=0.0,
+                                    stop=T,
+                                    step=gazebo.step_size() * gazebo.steps_per_run()))
+
+# Postural reference: NECK_YAW
+f_neck = 2.0
+A_neck = np.deg2rad(45.0)
+print(icub.joint_names())
+neck_0 = icub.get_joint(joint_name="neck_yaw").position()
+neck = (A_neck * np.sin(2 * np.pi * f_neck * t)
+        for t in np.arange(start=0.0,
+                           stop=T,
+                           step=gazebo.step_size() * gazebo.steps_per_run()))
 
 # Initialize the joint references
 joint_references = references.JointReferences.zero(len(controlled_joints))
@@ -115,8 +135,8 @@ for i, t in enumerate(np.arange(start=0.0,
                                 stop=T,
                                 step=gazebo.step_size() * gazebo.steps_per_run())):
 
-    if i == 50:
-        assert icub.get_link("chest").apply_world_force((100., 0, 0), duration=0.05)
+    # if i == 50:
+    #     assert icub.get_link("chest").apply_world_force((100., 0, 0), duration=0.05)
 
     print()
     print(">>>=======")
@@ -132,10 +152,16 @@ for i, t in enumerate(np.arange(start=0.0,
     print()
 
     # Set joints references
+    neck_index = controlled_joints.index("neck_yaw")
+    joint_references.position[neck_index] = neck_0 + next(neck)
+    rshoulder_index = controlled_joints.index("r_shoulder_roll")
+    lshoulder_index = controlled_joints.index("l_shoulder_roll")
+    joint_references.position[rshoulder_index] = rshoulder_roll_0 + next(shoulder_roll)
+    joint_references.position[lshoulder_index] = lshoulder_roll_0 + next(shoulder_roll)
     controller.set_joint_references(references=joint_references)
 
     # Set base references
-    # base_references.position = base_position_0 + np.array([0.0, next(base_y_position), 0.0])
+    base_references.position = base_position_0 + np.array([0.0, next(base_y_position), 0.0])
     # base_references.position = base_position_0 + np.array([0.0, 0.0, next(base_z_position) - 1.0])
     controller.set_base_references(references=base_references)
 
@@ -165,8 +191,8 @@ for i, t in enumerate(np.arange(start=0.0,
                                          frameC="r_foot", frameD="world",
                                          kin_dyn=controller.kindyn)
 
-    solution = velocity_wb_controller.QpSolution.Build(dofs=controller.dofs,
-                                                       data=controller.result.x)
+    # Get the QP solution and print it
+    solution = controller.solution
     print(f"ds_meas={np.array(icub.joint_velocities(controlled_joints))}")
     print(f"ds_opti={solution.ds}")
     print()

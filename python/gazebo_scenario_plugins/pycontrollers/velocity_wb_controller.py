@@ -3,6 +3,7 @@ import pathlib
 from . import qp
 import numpy as np
 import scipy.sparse
+from scipy import signal
 from . import osqp_utils
 import idyntree.bindings as idt
 from dataclasses import dataclass
@@ -64,6 +65,49 @@ class QpSolution:
         return QpSolution(v_b=v_b, ds=ds, tau=tau, forces=forces)
 
 
+class ButterworthLowPass:
+
+    def __init__(self, order: int, fs: float, cutoff: float, transient=False):
+
+        nyq = fs / 2
+
+        if cutoff >= nyq:
+            raise ValueError(f"Cutoff cannot be greater then Nyquist frequency ({nyq}Hz)")
+
+        # Compute TF coefficients
+        self.b, self.a = signal.butter(N=order, Wn=(cutoff / nyq), btype="low")
+
+        self.z = None
+        self.transient = transient
+
+    def filter(self, data: float) -> float:
+
+        if self.z is None:
+
+            # Compute initial conditions to step response
+            z = data * signal.lfilter_zi(b=self.b, a=self.a)
+
+            # Initialize the filter to the first input value if transient is False
+            self.z = z if self.transient is False else np.zeros_like(z)
+
+        out, self.z = signal.lfilter(b=self.b, a=self.a, x=[data], zi=self.z)
+        return float(out)
+
+
+class LowPassWrench:
+
+    def __init__(self, order: int, fs: float, cutoff: float, transient=False):
+
+        self.filters = [ButterworthLowPass(order=order,
+                                           fs=fs,
+                                           cutoff=cutoff,
+                                           transient=transient) for _ in range(6)]
+
+    def filter(self, wrench: np.ndarray) -> np.ndarray:
+
+        return np.array([self.filters[i].filter(data=d) for i, d in enumerate(wrench)])
+
+
 class VelocityWBController:
 
     def __init__(self,
@@ -71,7 +115,8 @@ class VelocityWBController:
                  model: scenario_core.Model,
                  parameters: Parameters,
                  controlled_joints: List[str] = None,
-                 gravity: List[float] = (0, 0, -9.80)):
+                 gravity: List[float] = (0, 0, -9.80),
+                 low_pass_wrench: bool = False):
 
         self.model = model
         self.urdf_file = urdf_file
@@ -102,6 +147,19 @@ class VelocityWBController:
         self.parameters = parameters
         self.initial_control_modes: Dict[str, int] = {}
 
+        self.wrenches = {}
+        self.wrench_filters = {}
+        self.low_pass_wrench = low_pass_wrench
+
+        if self.low_pass_wrench:
+
+            for key in parameters.frames_of_holonomic_contacts.values():
+                self.wrench_filters[key] = LowPassWrench(order=5,
+                                                         fs=(1/self.dt),
+                                                         cutoff=30.0,
+                                                         transient=False)
+
+        self.mode = None
         self.base_references: Optional[BaseReferences] = None
         self.joint_references: Optional[JointReferences] = None
 
@@ -118,12 +176,13 @@ class VelocityWBController:
             self.initial_control_modes[name] = self.model.get_joint(name).control_mode()
 
         # Select the control mode
-        # mode = scenario_core.JointControlMode_force
-        # mode = scenario_core.JointControlMode_position
-        mode = scenario_core.JointControlMode_velocity_direct
+        # self.mode = scenario_core.JointControlMode_idle
+        # self.mode = scenario_core.JointControlMode_force
+        # self.mode = scenario_core.JointControlMode_position
+        self.mode = scenario_core.JointControlMode_velocity_follower_dart
 
         # Change the control mode
-        ok_cm = self.model.set_joint_control_mode(mode, self.controlled_joints)
+        ok_cm = self.model.set_joint_control_mode(self.mode, self.controlled_joints)
 
         if not ok_cm:
             raise RuntimeError("Failed to control the joints in torque")
@@ -133,6 +192,9 @@ class VelocityWBController:
         self.joint_position_error_last = np.zeros(self.dofs)
 
     def step(self) -> None:
+
+        if self.low_pass_wrench:
+            self.filter_contact_wrenches()
 
         # Get the links associated to holonomic constraints that are in contact
         frames_of_hol_const = self._get_frames_with_active_holonomic_constraints()
@@ -281,8 +343,8 @@ class VelocityWBController:
         error[3:6] = self.parameters.k_w * self.integrator_ang_mom.step(value=Lcen_ang)
 
         # Get the constraint data
-        b_mom_des = Lcen_des - error
-        C_mom_des = np.hstack([J_cmm, np.zeros(shape=(6, dofs + 6 * self.num_forces))])
+        a_mom_des = Lcen_des - error
+        A_mom_des = np.hstack([J_cmm, np.zeros(shape=(6, dofs + 6 * self.num_forces))])
 
         # Get the current base position
         W_H_B = self.kindyn.get_world_base_transform()
@@ -297,7 +359,13 @@ class VelocityWBController:
         self.com_position_error_last = \
             self.kindyn.get_com_position() - com_position_desired
 
-        assert (C_mom_des @ np.zeros(NUM_VARS) - b_mom_des) is not None
+        # Split linear and angular
+        a_linmom_des = a_mom_des[0:3]
+        a_angmom_des = a_mom_des[3:6]
+        A_linmom_des = A_mom_des[0:3, :]
+        A_angmom_des = A_mom_des[3:6, :]
+
+        assert (A_mom_des @ np.zeros(NUM_VARS) - a_mom_des) is not None
 
         # ============
         # T1: Postural
@@ -355,123 +423,171 @@ class VelocityWBController:
         C_tau_max = np.hstack([np.zeros(shape=(dofs, 6 + dofs)),
                                np.eye(dofs),
                                np.zeros(shape=(dofs, 6 * self.num_forces))])
-        u_tau_max = np.ones(dofs) * 100.0
 
-        # ==============================
-        # Build the equality constraints
-        # ==============================
-
-        l, u, C = qp.ConstraintsBuilder(num_vars=NUM_VARS). \
-            add_equality(C=C_dyn, b=b_dyn). \
-            add_equality(C=C_mom_dyn, b=b_mom_dyn). \
-            add_bound(C=C_tau_max, u=u_tau_max, l=-u_tau_max). \
-            build()
-
-        if self.num_forces > 0:
-
-            l, u, C = qp.ConstraintsBuilder(num_vars=NUM_VARS, l=l, u=u, C=C). \
-                add_equality(C=C_hol, b=b_hol). \
-                add_upper_bound(C=C_wr, u=u_wr). \
-                build()
-
-        # ==================================
-        # Build the Hessian and the Gradient
-        # ==================================
-
-        self.weight_postural = 10.0
-        self.weight_momentum = 1.0
-
-        H, g = qp.CostBuilder(num_vars=NUM_VARS). \
-            add_task(A=A_p, a=a_p, weight=self.weight_postural). \
-            add_task(A=A_vel, a=a_vel, weight=0.1). \
-            add_task(A=A_tau, a=a_tau, weight=0.001). \
-            build()
-
-        # The base can be controlled only with contacts
-        if self.num_forces > 0:
-            H, g = qp.CostBuilder(num_vars=NUM_VARS, H=H, g=g). \
-                add_task(A=C_mom_des, a=b_mom_des, weight=self.weight_momentum). \
-                build()
+        u_tau_max = np.array(
+            [j.max_generalized_force() for j in self.model.joints(self.controlled_joints)])
 
         # ============
         # Solve the QP
         # ============
 
-        use_warm_start = False
-        # use_warm_start = True
-        if self._osqp is None or not use_warm_start:
-            self._osqp = None
-            self.osqp.setup(P=scipy.sparse.csc_matrix(H),
-                            q=g,
-                            A=scipy.sparse.csc_matrix(C),
-                            l=l, u=u,
-                            verbose=True,
-                            # verbose=False,
-                            # polish=True,
-                            warm_start=False,
-                            )
+        use_osqp = False
+
+        if use_osqp:
+
+            # ==============================
+            # Build the equality constraints
+            # ==============================
+
+            l, u, C = qp.ConstraintsBuilder(num_vars=NUM_VARS). \
+                add_equality(C=C_dyn, b=b_dyn). \
+                add_bound(C=C_tau_max, u=u_tau_max, l=-u_tau_max). \
+                build()
+
+            if self.num_forces > 0:
+                l, u, C = qp.ConstraintsBuilder(num_vars=NUM_VARS, l=l, u=u, C=C). \
+                    add_equality(C=C_hol, b=b_hol). \
+                    add_upper_bound(C=C_wr, u=u_wr). \
+                    build()
+
+            # ==================================
+            # Build the Hessian and the Gradient
+            # ==================================
+
+            H, g = qp.CostBuilder(num_vars=NUM_VARS). \
+                add_task(A=A_p, a=a_p, weight=10.0). \
+                add_task(A=A_vel, a=a_vel, weight=0.0). \
+                add_task(A=A_tau, a=a_tau, weight=0.0). \
+                add_task(A=A_tau_current, a=a_tau_current, weight=0.0). \
+                build()
+
+            # The base can be controlled only with contacts
+            if self.num_forces > 0:
+                H, g = qp.CostBuilder(num_vars=NUM_VARS, H=H, g=g). \
+                    add_task(A=A_linmom_des, a=a_linmom_des, weight=1.0). \
+                    add_task(A=A_angmom_des, a=a_angmom_des, weight=0.01). \
+                    build()
+
+            use_warm_start = False
+            # use_warm_start = True
+
+            if self._osqp is None or not use_warm_start:
+                self._osqp = None
+                self.osqp.setup(P=scipy.sparse.csc_matrix(H),
+                                q=g,
+                                A=scipy.sparse.csc_matrix(C),
+                                l=l, u=u,
+                                verbose=True,
+                                # verbose=False,
+                                # polish=True,
+                                warm_start=False,
+                                )
+            else:
+                self._osqp = None
+                self.osqp.setup(P=scipy.sparse.csc_matrix(H),
+                                q=g,
+                                A=scipy.sparse.csc_matrix(C),
+                                l=l, u=u,
+                                verbose=True,
+                                # verbose=False,
+                                # polish=True,
+                                warm_start=False,
+                                )
+
+                self.osqp.warm_start(x=self.result.x, y=self.result.y)
+
+                # self.osqp.update(Px=scipy.sparse.triu(H).data,
+                #                  q=g,
+                #                  #Ax=scipy.sparse.csc_matrix(C),
+                #                  Ax=C,
+                #                  l=l, u=u)
+
+            self.result = osqp_utils.OSQPResult.Build(result=self.osqp.solve())
+
+            if self.result.info.status_val != osqp_utils.OSQPStatus.OSQP_SOLVED.value:
+                raise RuntimeError("OSQP failed to solve the problem")
+
+            # Build the solution from the result
+            self.solution = QpSolution.Build(dofs=dofs, data=self.result.x)
+
+            for name, A, a in [
+                ("postural", A_p, a_p),
+                # ("momdes", C_mom_des, b_mom_des),
+                ("linmom", A_linmom_des, a_linmom_des),
+                ("angmom", A_angmom_des, a_angmom_des),
+                ("velocities", A_vel, a_vel),
+                ("torques", A_tau, a_tau),
+                # (C_mom_dyn, b_mom_dyn),
+                # (A_mom_min, a_mom_min),
+                # ("forces", A_force, a_force),
+            ]:
+
+                if A is None or a is None:
+                    continue
+
+                H, g = qp.CostBuilder(num_vars=NUM_VARS). \
+                    add_task(A=A, a=a). \
+                    build()
+
+                print(self.result.x.T @ H @ self.result.x + self.result.x.T @ g,
+                      f"\t{name}")
+
         else:
-            self._osqp = None
-            self.osqp.setup(P=scipy.sparse.csc_matrix(H),
-                            q=g,
-                            A=scipy.sparse.csc_matrix(C),
-                            l=l, u=u,
-                            verbose=True,
-                            # verbose=False,
-                            # polish=True,
-                            warm_start=False,
-                            )
-            self.osqp.warm_start(x=self.result.x, y=self.result.y)
-            # self.osqp.update(Px=scipy.sparse.triu(H).data,
-            #                  q=g,
-            #                  #Ax=scipy.sparse.csc_matrix(C),
-            #                  Ax=C,
-            #                  l=l, u=u)
 
-        self.result = osqp_utils.OSQPResult.Build(result=self.osqp.solve())
+            # CVXPY
+            import cvxpy as cp
+            x = cp.Variable(NUM_VARS)
 
-        if self.result.info.status_val != osqp_utils.OSQPStatus.OSQP_SOLVED.value:
-            raise RuntimeError("OSQP failed to solve the problem")
+            cost = 1.0 * cp.sum_squares(A_p @ x - a_p)
+            cost += 0.01 * cp.sum_squares(A_vel @ x - a_vel)
+            cost += 0.0001 * cp.sum_squares(A_tau @ x - a_tau)
 
-        # Build the solution from the result
-        solution = QpSolution.Build(dofs=dofs, data=self.result.x)
-        print(solution)
-        print()
+            if self.num_forces > 0:
+                cost += 0.5 * cp.sum_squares(A_linmom_des @ x - a_linmom_des)
+                cost += 0.01 * cp.sum_squares(A_angmom_des @ x - a_angmom_des)
 
-        for frame, force in zip(frames_of_hol_const, solution.forces):
+            obj = cp.Minimize(cost)
+
+            constraints = []
+            constraints += [C_dyn @ x == b_dyn]
+            constraints += [C_mom_dyn @ x == b_mom_dyn]
+            constraints += [C_tau_max @ x <= u_tau_max]
+            constraints += [C_tau_max @ x >= -u_tau_max]
+
+            if self.num_forces > 0:
+                constraints += [C_hol @ x == b_hol]
+                constraints += [C_wr @ x <= u_wr]
+
+            cvxpy_prob = cp.Problem(obj, constraints)
+
+            try:
+                cvxpy_prob.solve(solver=cp.OSQP, verbose=True)
+                # cvxpy_prob.solve(solver=cp.ECOS, verbose=False)
+                # cvxpy_prob.solve(solver=cp.SCS, verbose=True)
+
+            except cp.error.SolverError:
+                for c in constraints:
+                    print(c.dual_value)
+                raise RuntimeError("Failed to solve QP")
+
+            # Build the solution from the result
+            self.solution = QpSolution.Build(dofs=dofs, data=x.value)
+            print(self.solution)
+            print()
+
+        for frame, force in zip(frames_of_hol_const, self.solution.forces):
             print(frame, force)
 
         print()
-        print(f"H_cost={self.result.x.T @ H @ self.result.x}")
-        print(f"g_cost={self.result.x.T @ g}")
 
-        for name, A, a in [
-            ("postural", A_p, a_p),
-            ("torques", A_tau, a_tau),
-            ("momdes", C_mom_des, b_mom_des),
-            # (C_mom_dyn, b_mom_dyn),
-            # (A_mom_min, a_mom_min),
-            # ("forces", A_force, a_force),
-            ("velocities", A_vel, a_vel),
-        ]:
-
-            if A is None or a is None:
-                continue
-
-            H, g = qp.CostBuilder(num_vars=NUM_VARS). \
-                add_task(A=A, a=a). \
-                build()
-            # print("=")
-            # print(results.x.T @ H @ results.x)
-            # print(results.x.T @ g)
-            print(self.result.x.T @ H @ self.result.x + self.result.x.T @ g, f"\t{name}")
-            # print(results.x.T @ H @ results.x + results.x.T @ g + a.T @ a)
-        print()
-
-        # ok_ref = self.model.set_joint_generalized_force_targets(
-        #     solution.tau.tolist(), self.controlled_joints)
-        ok_ref = self.model.set_joint_velocity_targets(
-            solution.ds.tolist(), self.controlled_joints)
+        if self.mode == scenario_core.JointControlMode_force:
+            ok_ref = self.model.set_joint_generalized_force_targets(
+                self.solution.tau.tolist(), self.controlled_joints)
+        elif self.mode == scenario_core.JointControlMode_velocity_follower_dart:
+            ok_ref = self.model.set_joint_velocity_targets(
+                self.solution.ds.tolist(), self.controlled_joints)
+        else:
+            raise RuntimeError
 
         if not ok_ref:
             raise RuntimeError("Failed to set the joint torques targets")
@@ -486,8 +602,7 @@ class VelocityWBController:
 
     def update_state_from_model(self) -> None:
 
-        self.kindyn.set_robot_state_from_model(model=self.model,
-                                               world_gravity=self.gravity)
+        self.kindyn.set_robot_state_from_model(model=self.model)
 
     def set_joint_references(self, references: JointReferences) -> None:
 
@@ -519,7 +634,9 @@ class VelocityWBController:
             return self._kindyn
 
         kindyn = idyntree.kindyncomputations.KinDynComputations(
-            model_file=self.urdf_file, considered_joints=self.controlled_joints)
+            model_file=self.urdf_file,
+            world_gravity=self.gravity,
+            considered_joints=self.controlled_joints)
 
         self._kindyn = kindyn
         return self._kindyn
@@ -571,11 +688,29 @@ class VelocityWBController:
         self._integrator_ang_mom = integrator
         return self._integrator_ang_mom
 
+    def filter_contact_wrenches(self) -> None:
+
+        self.wrenches = {}
+
+        for frame_name, parent_link in self.parameters.frames_of_holonomic_contacts.items():
+
+            link = self.model.get_link(parent_link)
+
+            wrench_raw = link.contact_wrench()
+            wrench_filtered = self.wrench_filters[parent_link].filter(
+                wrench=wrench_raw)
+
+            self.wrenches[parent_link] = wrench_filtered
+
     # =================
     # Private Resources
     # =================
 
     def _get_frames_with_active_holonomic_constraints(self) -> List[str]:
+
+        # TODO OOOOOOO!!!!
+        # return ["l_sole", "r_sole"]
+        # return ["r_sole", "l_sole"]
 
         frames_with_active_holonomic_constraints = []
 
@@ -596,12 +731,18 @@ class VelocityWBController:
                 if contact.body_b in self.model.link_names(scoped=True):
                     continue
 
+                if self.low_pass_wrench:
+                    assert parent_link in self.wrenches
+                    wrench_filtered = self.wrenches[parent_link]
+                else:
+                    wrench_filtered = link.contact_wrench()
+
                 # We use the desired minimum vertical force as threshold
                 # TODO this is not at the CoP
-                if np.linalg.norm(link.contact_wrench()[0:3]) < self.parameters.fz_min:
+                if np.linalg.norm(wrench_filtered[0:3]) < self.parameters.fz_min:
                     continue
 
-                print(f"Detected {frame_name} with norm={np.linalg.norm(link.contact_wrench()[0:3])}")
+                print(f"Detected {frame_name} with norm={np.linalg.norm(wrench_filtered[0:3])}")
                 frames_with_active_holonomic_constraints.append(frame_name)
 
         return frames_with_active_holonomic_constraints
@@ -612,6 +753,10 @@ class VelocityWBController:
 
         # Get the 1-based index of the link name inside the QP output
         this_idx = self._get_frames_with_active_holonomic_constraints().index(link_name) + 1
+
+        if self.parameters.num_vertexes % 2 != 0:
+            # Due to vertical line
+            raise ValueError("Odd number of vertexes suffer numerical errors")
 
         # Discretize the normalized circle corresponding of a cone level
         angles = np.linspace(start=0,
@@ -635,9 +780,9 @@ class VelocityWBController:
             # Interpolate a line passing through the two points
             a, b = self._line_params(p1=point1, p2=point2)
 
-            if a == 0.0:
-                msg = "Edge case found. Maybe you used an even number of vertices?"
-                raise RuntimeError(msg)
+            # if a == 0.0:
+            #     msg = "Edge case found. Maybe you used an even number of vertices?"
+            #     raise RuntimeError(msg)
 
             # Check whether it's the upper or lower part of the circle
             # (it affects the sign of the inequality)

@@ -36,6 +36,12 @@ setup(
         'gym-ignition',
         'dataclasses',
     ],
+    setup_requires=[
+        "setuptools_scm",
+        "ninja",
+        "gym-ignition",
+        "cmake-build-extension",
+    ],
     packages=find_packages("python"),
     package_dir={'': "python"},
     ext_modules=[CMakeExtension(name="actuation_delay",

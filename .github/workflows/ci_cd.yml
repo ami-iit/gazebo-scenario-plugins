@@ -25,7 +25,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install basic tools
-        run: pip install pytest setuptools_scm cmake_build_extension
+        run: pip install pytest setuptools_scm cmake_build_extension wheel
 
       - name: Create sdist
         run: python setup.py sdist

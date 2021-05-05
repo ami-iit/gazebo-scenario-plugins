@@ -34,7 +34,6 @@ setup(
     python_requires='>=3.8',
     install_requires=[
         "gym-ignition",
-        "dataclasses",
     ],
     setup_requires=[
         "setuptools_scm",

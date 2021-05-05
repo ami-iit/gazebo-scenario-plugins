@@ -4,6 +4,9 @@ project(LowPassTarget VERSION 1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Use -fPIC even if statically compiled
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 find_package(Scenario COMPONENTS Gazebo REQUIRED)
 
 # ==========

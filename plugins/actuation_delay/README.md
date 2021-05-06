@@ -1,6 +1,6 @@
 # ActuationDelay
 
-Delay the position targets(references) of all joints belonging to a model for a configurable number of physics steps.
+Delay the position targets (references) of all joints belonging to a model for a configurable number of physics steps.
 
 :warning: This plugin must be inserted in the model before enabling the controller (either the default PID or a custom one). 
 In the case of PIDs, they are enabled by ScenarIO when either `Joint::setControlMode` or `Model::setJointControlMode` are called.

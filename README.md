@@ -1,6 +1,7 @@
-# gazebo-scenario-plugins
 
 :warning: This repository is still experimental, expect bugs and breaking changes :warning:
+
+# gazebo-scenario-plugins
 
 [![Version](https://img.shields.io/pypi/v/gazebo-scenario-plugins.svg)](https://pypi.org/project/gazebo-scenario-plugins/)
 [![Python versions](https://img.shields.io/pypi/pyversions/gazebo-scenario-plugins.svg)](https://pypi.org/project/gazebo-scenario-plugins/)

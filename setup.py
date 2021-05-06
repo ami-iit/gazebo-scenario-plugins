@@ -36,6 +36,7 @@ setup(
         "gym-ignition",
     ],
     setup_requires=[
+        "cmake>=3.12",
         "setuptools_scm",
         "ninja",
         "gym-ignition",

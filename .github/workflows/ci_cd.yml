@@ -97,7 +97,7 @@ jobs:
     if: |
       github.repository == 'dic-iit/gazebo-scenario-plugins' &&
       ((github.event_name == 'release' && github.event.action == 'published') ||
-       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+       (github.event_name == 'push' && github.ref == 'refs/heads/master'))
 
     steps:
 

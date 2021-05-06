@@ -1,3 +1,3 @@
 [build-system]
-requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=3.4", "ninja", "gym-ignition", "cmake>=3.12", "cmake-build-extension"]
+requires = ["setuptools>=42", "wheel", "setuptools_scm[toml]>=3.4", "ninja", "gym-ignition", "cmake>=3.18.2", "cmake-build-extension"]
 build-backend = "setuptools.build_meta"

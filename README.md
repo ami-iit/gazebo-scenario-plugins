@@ -17,6 +17,7 @@ Ignition Gazebo Plugins implemented with [ScenarIO](https://robotology.github.io
 | Name                                        | Description                                                  |
 | ------------------------------------------- | ------------------------------------------------------------ |
 | [`ActuationDelay`](plugins/actuation_delay) | Simulate actuation delay inserting the targets (joint references) into a FIFO buffer. |
+| [`LowPassTarget`](plugins/low_pass_target)  | Filter the joint targets (references) with a configurable Butterworth low-pass filter. |
 
 ## Dependencies
 

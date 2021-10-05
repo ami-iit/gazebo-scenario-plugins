@@ -2,25 +2,49 @@ name: CI/CD
 
 on:
   push:
-    branches:
-      - '**'
-    tags-ignore:
-      - '**'
+    branches: ['**']
+    tags-ignore: ['**']
   pull_request:
+  workflow_dispatch:
   release:
-    types:
-      - published
+    types: [published]
 
 jobs:
 
   build_sdist:
     name: Build source distribution
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@master
+      - run: git fetch --prune --unshallow
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install sdist dependencies
+        run: pip install build
+
+      - name: Create sdist
+        run: python -m build --sdist .
+
+      - uses: actions/upload-artifact@v2
+        with:
+          path: dist/*.tar.gz
+          name: dist
+
+  test_sdist:
+    name: Test source distribution
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version:
           - 3.8
+          - 3.9
 
     steps:
 
@@ -32,81 +56,58 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install sdist dependencies
-        run: pip install wheel setuptools_scm cmake_build_extension
-
-      - name: Create sdist
-        run: python setup.py sdist
-
-      - uses: actions/upload-artifact@v2
-        with:
-          path: dist/*.tar.gz
-
-  test_sdist:
-    name: Test source distribution
-    needs: [ build_sdist ]
-    runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version:
-          - 3.8
-
-    steps:
-
-      - uses: actions/checkout@master
-      - uses: actions/download-artifact@v2
-        with:
-          name: artifact
-          path: dist
-
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-
       - name: Install build dependencies
         run: |
           wget http://packages.osrfoundation.org/gazebo.key -O - | sudo apt-key add -
           sudo apt-add-repository "deb http://packages.osrfoundation.org/gazebo/ubuntu-$CHANNEL `lsb_release -cs` main"
           sudo apt-get update
-          sudo apt-get install ignition-$IGNITION_DISTRIBUTION libprotobuf17
+          sudo apt-get install ignition-$IGNITION_DISTRIBUTION
+          pip install wheel
         env:
           CHANNEL: stable
-          IGNITION_DISTRIBUTION: dome
+          IGNITION_DISTRIBUTION: fortress
 
-      - name: Install sdist
-        run: pip -v install dist/*.tar.gz
+      - name: Install Python package
+        run: pip install .[all]
 
       - name: Run tests
-        run: pip install pytest && pytest tests
+        run: pytest
+        env:
+          IGN_GAZEBO_PHYSICS_ENGINE_PATH: /usr/lib/x86_64-linux-gnu
 
       - name: Valgrind
         if: failure()
         run: |
           sudo apt install valgrind
           pip install colour-valgrind
-          colour-valgrind pytest tests
+          colour-valgrind pytest .
+        env:
+          IGN_GAZEBO_PHYSICS_ENGINE_PATH: /usr/lib/x86_64-linux-gnu
 
   upload_pypi:
     name: Publish to PyPI
-    needs: [ test_sdist ]
-    runs-on: ubuntu-20.04
+    needs:
+      - build_sdist
+      - test_sdist
+    runs-on: ubuntu-latest
     # Master branch produces pre-releases.
     # Tagged versions produce stable releases linked to GitHub releases.
-    if: |
-      github.repository == 'dic-iit/gazebo-scenario-plugins' &&
-      ((github.event_name == 'release' && github.event.action == 'published') ||
-       (github.event_name == 'push' && github.ref == 'refs/heads/master'))
 
     steps:
 
       - uses: actions/download-artifact@v2
         with:
-          name: artifact
+          name: dist
           path: dist
 
+      - name: Inspect dist folder
+        run: ls -lah dist/
+
       - name: Publish to PyPI
+        if: |
+          github.repository == 'ami-iit/gazebo-scenario-plugins' &&
+          ((github.event_name == 'release' && github.event.action == 'published') ||
+           (github.event_name == 'push' && github.ref == 'refs/heads/master'))
         uses: pypa/gh-action-pypi-publish@master
         with:
           password: ${{ secrets.pypi_password }}

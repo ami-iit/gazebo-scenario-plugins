@@ -1,12 +1,13 @@
-import gym
-import pytest
-import numpy as np
 from queue import Queue
+
+import gym
 import gym_ignition_models
-from gym_ignition import utils
-from scenario import core as scenario_core
+import numpy as np
+import pytest
 from gazebo_scenario_plugins import plugins
+from gym_ignition import utils
 from gym_ignition.utils.scenario import init_gazebo_sim
+from scenario import core as scenario_core
 
 # Set the verbosity
 utils.logger.set_level(gym.logger.DEBUG)
@@ -14,33 +15,31 @@ utils.logger.set_level(gym.logger.DEBUG)
 # Panda PID gains
 # https://github.com/mkrizmancic/franka_gazebo/blob/master/config/default.yaml
 panda_pid_gains_1000Hz = {
-    'panda_joint1': scenario_core.PID(50,    0,  20),
-    'panda_joint2': scenario_core.PID(10000, 0, 500),
-    'panda_joint3': scenario_core.PID(100,   0,  10),
-    'panda_joint4': scenario_core.PID(1000,  0,  50),
-    'panda_joint5': scenario_core.PID(100,   0,  10),
-    'panda_joint6': scenario_core.PID(100,   0,  10),
-    'panda_joint7': scenario_core.PID(10,    0.5, 0.1),
-    'panda_finger_joint1': scenario_core.PID(100, 0, 50),
-    'panda_finger_joint2': scenario_core.PID(100, 0, 50),
+    "panda_joint1": scenario_core.PID(50, 0, 20),
+    "panda_joint2": scenario_core.PID(10000, 0, 500),
+    "panda_joint3": scenario_core.PID(100, 0, 10),
+    "panda_joint4": scenario_core.PID(1000, 0, 50),
+    "panda_joint5": scenario_core.PID(100, 0, 10),
+    "panda_joint6": scenario_core.PID(100, 0, 10),
+    "panda_joint7": scenario_core.PID(10, 0.5, 0.1),
+    "panda_finger_joint1": scenario_core.PID(100, 0, 50),
+    "panda_finger_joint2": scenario_core.PID(100, 0, 50),
 }
 
 
 def test_actuation_delay():
 
     # Get the simulator and the world
-    gazebo, world = init_gazebo_sim(step_size=0.001,
-                                    real_time_factor=1.0,
-                                    steps_per_run=1)
+    gazebo, world = init_gazebo_sim(
+        step_size=0.001, real_time_factor=1.0, steps_per_run=1
+    )
 
     # Get the panda urdf
     panda_urdf = gym_ignition_models.get_model_file("panda")
 
     # Insert the panda arm
     model_name = "panda"
-    assert world.insert_model(panda_urdf,
-                              scenario_core.Pose_identity(),
-                              model_name)
+    assert world.insert_model(panda_urdf, scenario_core.Pose_identity(), model_name)
 
     # Get the model
     panda = world.get_model(model_name)
@@ -77,8 +76,10 @@ def test_actuation_delay():
 
     # Build a new reference for a single joint
     q0_j1 = joint1.position()
-    q_j1 = (0.9 * joint1_range / 2 * np.sin(2 * np.pi * 0.33 * t)
-            for t in np.arange(start=0, stop=10.0, step=gazebo.step_size()))
+    q_j1 = (
+        0.9 * joint1_range / 2 * np.sin(2 * np.pi * 0.33 * t)
+        for t in np.arange(start=0, stop=10.0, step=gazebo.step_size())
+    )
 
     # Create a queue
     queue = Queue(maxsize=actuation_delay.delay)

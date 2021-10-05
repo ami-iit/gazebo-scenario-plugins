@@ -95,7 +95,7 @@ The low-level APIs to load plugins from your Python code match almost 1:1 the C+
 
 Refer to the [ScenarIO Python APIs documentation](https://robotology.github.io/gym-ignition/master/apidoc/scenario/scenario.bindings.html) for more details.
 
-In addition to the low-level APIs, this repository provides a `gazebo_scenario_plugins` Python package that includes helper classes that simplify building the plugin context. Refer to the [`gazebo_scenario_plugins.plugins`](python/gazebo_scenario_plugins/plugins) module for more details.
+In addition to the low-level APIs, this repository provides a `gazebo_scenario_plugins` Python package that includes helper classes that simplify building the plugin context. Refer to the [`gazebo_scenario_plugins.plugins`](python/gazebo_scenario_plugins/plugins.py) module for more details.
 
 ## Contributing
 

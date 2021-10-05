@@ -1,9 +1,9 @@
 import abc
-from typing import Tuple
 from dataclasses import dataclass, field
+from typing import Tuple
 
 # Default SDF version used in the serialized XML context
-SDF_VERSION=1.7
+SDF_VERSION = 1.7
 
 # Read the following for more information about dataclasses internals:
 # https://florimond.dev/blog/articles/2018/10/reconciling-dataclasses-and-properties-in-python/

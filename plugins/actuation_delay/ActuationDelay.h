@@ -1,6 +1,8 @@
 #ifndef GAZEBO_SCENARIO_PLUGINS_ACTUATIONDELAY_H
 #define GAZEBO_SCENARIO_PLUGINS_ACTUATIONDELAY_H
 
+#include <cstdint>
+
 #include <ignition/gazebo/Entity.hh>
 #include <ignition/gazebo/EntityComponentManager.hh>
 #include <ignition/gazebo/EventManager.hh>

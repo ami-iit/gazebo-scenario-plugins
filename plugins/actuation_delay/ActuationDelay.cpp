@@ -11,6 +11,7 @@
 #include <scenario/gazebo/helpers.h>
 #include <sdf/Element.hh>
 
+#include <cstdint>
 #include <deque>
 #include <stdexcept>
 #include <string>

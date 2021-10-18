@@ -23,6 +23,6 @@ target_include_directories(ActuationDelay PRIVATE
 
 install(
     TARGETS ActuationDelay
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin)
+    LIBRARY DESTINATION lib/gsp
+    ARCHIVE DESTINATION lib/gsp
+    RUNTIME DESTINATION bin/gsp)

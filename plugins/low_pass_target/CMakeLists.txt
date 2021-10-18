@@ -61,6 +61,6 @@ target_include_directories(LowPassTarget PRIVATE
 
 install(
     TARGETS LowPassTarget
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin)
+    LIBRARY DESTINATION lib/gsp
+    ARCHIVE DESTINATION lib/gsp
+    RUNTIME DESTINATION bin/gsp)

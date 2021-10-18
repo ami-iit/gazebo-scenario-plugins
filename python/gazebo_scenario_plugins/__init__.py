@@ -8,7 +8,7 @@ def setup_environment() -> None:
     folder containing the plugins of this repository.
     """
 
-    plugin_dir = Path(os.path.dirname(__file__)) / "lib"
+    plugin_dir = Path(os.path.dirname(__file__)) / "lib" / "gsp"
 
     if "IGN_GAZEBO_SYSTEM_PLUGIN_PATH" in os.environ:
         os.environ["IGN_GAZEBO_SYSTEM_PLUGIN_PATH"] += f":{plugin_dir}"
